@@ -116,6 +116,13 @@ def main():
     logger.info("")
     logger.info("  Done.")
 
+    # CFR + MTTR
+    cfr  = lake.change_failure_rate(days=args.days)
+    mttr = lake.mttr(days=args.days)
+    logger.info(f"  Change Failure Rate        : {cfr['cfr_percent']}%  ({cfr['incidents']} incidents / {cfr['deployments']} deploys)  [{cfr['dora_level']}]")
+    logger.info(f"  MTTR median                : {mttr['mttr_median_hrs']}h  [{mttr['dora_level']}]")
+    logger.info(f"  MTTR p95                   : {mttr['mttr_p95_hrs']}h")
+
 
 if __name__ == "__main__":
     main()
