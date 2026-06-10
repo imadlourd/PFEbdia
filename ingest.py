@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from connectors import GitHubConnector, JiraConnector
+from connectors import GitHubConnector, JiraConnector, SlackConnector
 from lake       import DataLake
 
 logging.basicConfig(
@@ -56,8 +56,15 @@ def main():
     logger.info("=" * 55)
     jira_events = jira.fetch_all(days_back=args.days)
 
+    # Slack
+    logger.info("=" * 55)
+    logger.info(f"  Slack — last {args.days} days")
+    logger.info("=" * 55)
+    slack = SlackConnector.synthetic()
+    slack_events = slack.fetch_all(days_back=args.days)
+
     # Ingest
-    all_events = github_events + jira_events
+    all_events = github_events + jira_events + slack_events
     logger.info("=" * 55)
     logger.info(f"  Ingesting {len(all_events)} events")
     logger.info("=" * 55)
@@ -95,6 +102,17 @@ def main():
 
     df_blk = lake.blocked_tickets(days=args.days)
     logger.info(f"  Blocked tickets    : {len(df_blk)}")
+
+    df_inc = lake.query("""
+        SELECT event_type, COUNT(*) AS n FROM events
+        WHERE source = 'slack'
+        AND event_type IN ('incident_opened', 'incident_resolved')
+        GROUP BY 1
+    """)
+    if not df_inc.empty:
+        for _, row in df_inc.iterrows():
+            logger.info(f"  {row['event_type']:<25}: {int(row['n'])}")
+
     logger.info("")
     logger.info("  Done.")
 
