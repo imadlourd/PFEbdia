@@ -414,93 +414,12 @@ elif page == "Agent IA":
 
     lt, ct, cfr_d, mttr_d, blk = load_agent_data(days)
 
-    def agent_response(q: str) -> tuple[str, str]:
-        q = q.lower()
-
-        if any(w in q for w in ["gamma","pire","mauvais","critique","problem"]):
-            lt_g = lt[lt["team"]=="gamma"]["lead_time_hrs"].median() if not lt.empty else 0
-            ct_g = ct[ct["team"]=="gamma"]["cycle_time_hrs"].median() if not ct.empty else 0
-            lt_a = lt[lt["team"]=="alpha"]["lead_time_hrs"].median() if not lt.empty else 0
-            ct_a = ct[ct["team"]=="alpha"]["cycle_time_hrs"].median() if not ct.empty else 0
-            return (
-                f"L'équipe **Gamma** est en état critique sur les {days} derniers jours. "
-                f"Son Lead Time median est de **{lt_g:.1f}h** ({lt_g/lt_a:.1f}x celui d'Alpha) "
-                f"et son Cycle Time median est de **{ct_g:.1f}h** ({ct_g/ct_a:.1f}x celui d'Alpha). "
-                f"Ces valeurs sont stables sur 6 semaines, ce qui indique un problème structurel "
-                f"et non conjoncturel. Recommandation : revue de l'organisation du travail et "
-                f"identification des dépendances bloquantes.",
-                "Source : GitHub PR events + Jira ticket_closed events · Data lake local"
-            )
-
-        if any(w in q for w in ["bloque","bloqu","blocked","bloquant"]):
-            return (
-                f"**{len(blk)} tickets** sont passés en statut 'Blocked' sur les {days} derniers jours. "
-                f"C'est le signal le plus actionnable : chaque ticket bloqué représente du cycle time perdu. "
-                f"Recommandation : revue quotidienne des tickets bloqués en standup.",
-                "Source : Jira ticket_transitioned events · Data lake local"
-            )
-
-        if any(w in q for w in ["cfr","failure","echec","incident","prod"]):
-            return (
-                f"Le Change Failure Rate est de **{cfr_d['cfr_percent']}%** sur les {days} derniers jours "
-                f"({cfr_d['incidents']} incidents pour {cfr_d['deployments']} déploiements). "
-                f"C'est un niveau **{cfr_d['dora_level'].upper()}** selon DORA — au-dessus du seuil critique de 15%. "
-                f"Cela signifie qu'1 déploiement sur {round(100/cfr_d['cfr_percent'],1) if cfr_d['cfr_percent']>0 else '?'} "
-                f"cause un incident en production.",
-                "Source : Slack incident_opened events + GitHub Actions · Data lake local"
-            )
-
-        if any(w in q for w in ["mttr","restaur","restore","incident","temps de resolut"]):
-            m = mttr_d.get("mttr_median_hrs", 0)
-            return (
-                f"Le MTTR median est de **{m:.1f}h** (p95 : {mttr_d.get('mttr_p95_hrs', 0):.1f}h) "
-                f"sur {mttr_d['n_incidents']} incidents résolus. "
-                f"Niveau DORA : **{mttr_d['dora_level'].upper()}**. "
-                f"Le seuil Elite est < 1h — l'équipe est encore loin de ce niveau.",
-                "Source : Slack incident_opened / incident_resolved · Data lake local"
-            )
-
-        if any(w in q for w in ["lead time","lead","pr","pull request","review"]):
-            med = lt["lead_time_hrs"].median() if not lt.empty else 0
-            return (
-                f"Le Lead Time median global est de **{med:.1f}h** sur les {days} derniers jours. "
-                f"Par équipe : Alpha {lt[lt.team=='alpha']['lead_time_hrs'].median():.1f}h · "
-                f"Delta {lt[lt.team=='delta']['lead_time_hrs'].median():.1f}h · "
-                f"Beta {lt[lt.team=='beta']['lead_time_hrs'].median():.1f}h · "
-                f"Gamma {lt[lt.team=='gamma']['lead_time_hrs'].median():.1f}h. "
-                f"Niveau global : **HIGH** (< 24h). Le principal goulot est le PR review lag.",
-                "Source : GitHub pr_merged events · Data lake local"
-            )
-
-        if any(w in q for w in ["cycle","ticket","jira","livr"]):
-            med = ct["cycle_time_hrs"].median() if not ct.empty else 0
-            return (
-                f"Le Cycle Time median est de **{med:.1f}h** sur les {days} derniers jours. "
-                f"Écart critique : Alpha {ct[ct.team=='alpha']['cycle_time_hrs'].median():.1f}h "
-                f"vs Gamma {ct[ct.team=='gamma']['cycle_time_hrs'].median():.1f}h. "
-                f"L'équipe Gamma met 3x plus de temps à fermer ses tickets.",
-                "Source : Jira ticket_closed events · Data lake local"
-            )
-
-        if any(w in q for w in ["deploy","freq","livraison","mis en prod"]):
-            avg = get_lake().deployment_frequency(days=days)["deployments"].mean() if not get_lake().deployment_frequency(days=days).empty else 0
-            return (
-                f"La fréquence de déploiement moyenne est de **{avg:.1f} déploiements/jour** "
-                f"sur les {days} derniers jours. C'est un niveau **ELITE** selon DORA (seuil : ≥ 1/jour). "
-                f"Le pipeline CI/CD est mature et automatisé.",
-                "Source : GitHub release_created + action_run_completed · Data lake local"
-            )
-
-        return (
-            f"Sur les {days} derniers jours, voici le résumé DORA : "
-            f"Deploy Freq {get_lake().deployment_frequency(days=days)['deployments'].mean():.1f}/j (ELITE) · "
-            f"Lead Time {lt['lead_time_hrs'].median():.1f}h (HIGH) · "
-            f"CFR {cfr_d['cfr_percent']}% (LOW) · "
-            f"MTTR {mttr_d.get('mttr_median_hrs',0):.1f}h (HIGH). "
-            f"Point critique : le CFR est trop élevé. Posez-moi une question spécifique sur une métrique ou une équipe.",
-            "Source : Data lake local · 3 sources (GitHub, Jira, Slack)"
-        )
-
+    @st.cache_resource
+    def get_agent():
+        from agents import DevInsightAgent
+        from graph  import KnowledgeGraph
+        kg = KnowledgeGraph(get_lake()).build()
+        return DevInsightAgent(get_lake(), kg)
     # Chat UI
     if "messages" not in st.session_state:
         st.session_state.messages = [
@@ -529,7 +448,11 @@ elif page == "Agent IA":
     for i, sug in enumerate(suggestions):
         with cols[i % 3]:
             if st.button(sug, key=f"sug_{i}"):
-                resp, src = agent_response(sug)
+                with st.spinner("Analyse en cours..."):
+                    agent  = get_agent()
+                    result = agent.ask(sug)
+                    resp   = result["answer"].replace("&#39;", "'").replace("&amp;", "&")
+                    src    = ", ".join(result["sources"]) if result["sources"] else "ollama:llama3.2:3b"
                 st.session_state.messages.append({"role":"user","text":sug})
                 st.session_state.messages.append({"role":"agent","text":resp,"source":src})
                 st.rerun()
@@ -543,7 +466,11 @@ elif page == "Agent IA":
             submitted = st.form_submit_button("Envoyer")
 
     if submitted and user_input.strip():
-        resp, src = agent_response(user_input)
+        with st.spinner("Agent en cours de réflexion..."):
+            agent  = get_agent()
+            result = agent.ask(user_input)
+            resp   = result["answer"].replace("&#39;", "'").replace("&amp;", "&")
+            src    = ", ".join(result["sources"]) if result["sources"] else "ollama:llama3.2:3b"
         st.session_state.messages.append({"role":"user","text":user_input})
         st.session_state.messages.append({"role":"agent","text":resp,"source":src})
         st.rerun()
