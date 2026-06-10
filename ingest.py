@@ -116,6 +116,10 @@ def main():
     logger.info("")
     logger.info("  Done.")
 
+    # Graphiques
+    from metrics import generate_all
+    generate_all(lake, output_dir="./charts", days=42)
+
     # CFR + MTTR
     cfr  = lake.change_failure_rate(days=args.days)
     mttr = lake.mttr(days=args.days)
